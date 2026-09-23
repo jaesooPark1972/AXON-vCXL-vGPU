@@ -1,18 +1,29 @@
-AXON SOVEREIGN NEURAL ACCELERATOR DESKTOP RUNTIME END-USER LICENSE AGREEMENT (EULA)
+AXON SOVEREIGN NEURAL ACCELERATOR COMMUNITY & ENTERPRISE LICENSE AGREEMENT (EULA)
 
-Copyright (c) 2026 Axon Labs & Park Jaesoo. All rights reserved.
+Copyright (c) 2026 AXON LABS & Park Jaesoo. All rights reserved.
 
-1. GRANT OF LICENSE
-Axon Labs grants you a non-exclusive license to use the AXON Sovereign Neural Engine for running on-device AI inference, vCPNPU GPU virtualization, and vCXL tiered memory caching on supported Windows hardware.
+1. GRANT OF LICENSE (FREE COMMUNITY EDITION)
+AXON LABS grants individual developers, researchers, students, and end-users a revocable, non-exclusive, non-transferable, royalty-free license to install, execute, and use the binary distribution of the AXON-vCXL-vGPU Engine on personal desktop workstations solely for personal, research, evaluation, and non-commercial local inference purposes.
 
-2. CORE PROPRIETARY TECHNOLOGIES
-This software embodies intellectual property protected under global patents:
+2. COMMERCIAL & ENTERPRISE USE RESTRICTIONS
+Commercial deployment, redistribution, hosting as a paid cloud API service, bundling into third-party commercial software/hardware products, or enterprise use by organizations requires a separate, written Enterprise Commercial Licensing Agreement with AXON LABS.
+
+3. RESERVATION OF PATENT & INTELLECTUAL PROPERTY RIGHTS
+This software embodies breakthrough proprietary intellectual property protected under national and international patent applications and trade secrets, including but not limited to:
 - PAT-01: Advanced Ultra-Low Power SSA Neural Acceleration Architecture
 - PAT-20: High-Efficiency VLA Real-Time Robotic Execution Architecture
 - PAT-24: Virtual CXL (vCXL) Layered Memory Fabric Architecture
 
-3. NO REVERSE ENGINEERING
-You may not reverse-engineer, decompile, or disassemble the proprietary binary drivers, 13-Code in-band protocols, or kernel models.
+Nothing in this agreement shall be construed as granting, by implication, estoppel, or otherwise, any patent license, patent covenant, or transfer of ownership of any patent claims held by AXON LABS or Park Jaesoo.
 
-4. DISCLAIMER OF WARRANTY
-The software is provided "AS IS", without warranty of any kind, express or implied.
+4. STRICT PROHIBITION OF REVERSE ENGINEERING
+You shall not, and shall not permit any third party to:
+(a) Decompile, disassemble, reverse engineer, decrypt, or attempt to derive the underlying mathematical schemes, lookup tables, or algorithms from the software binaries;
+(b) Extract, clone, or port the vCPNPU virtualization routines, vCXL DMA tiering controllers, or NWIR routing logic to unauthorized computing platforms, ASICs, or NPUs;
+(c) Remove, alter, or obscure any proprietary copyright, patent, or trademark notices.
+
+5. DISCLAIMER OF WARRANTIES & LIMITATION OF LIABILITY
+The software is provided "AS IS", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall AXON LABS or Park Jaesoo be liable for any claim, damages, or other liability arising from the use of this software.
+
+For commercial licensing, OEM partnerships, and robotic hardware integrations, contact:
+AXON LABS — https://github.com/jaesooPark1972/AXON-vCXL-vGPU
