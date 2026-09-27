@@ -72,7 +72,7 @@ class ProviderABITests(unittest.TestCase):
                     "memory_node": "memory:shared-cxl",
                     "memory_kind": "cxl",
                 },
-                key="lease-1",
+                key="lease-1-release",
             )
             released = handle_request(release, state_path=state)
             self.assertTrue(released["ok"])
