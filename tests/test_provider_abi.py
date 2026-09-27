@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from provider_abi import (
+    IDEMPOTENT_ACTIONS,
     PROVIDER_ID,
     PROVIDER_REQUEST_SCHEMA,
     handle_request,
@@ -12,15 +13,21 @@ from provider_abi import (
 )
 
 
-def request(request_id, action, payload=None, key=None):
+def request(request_id, action, payload=None, key=None, execution_key=None):
     data = {
         "schema": PROVIDER_REQUEST_SCHEMA,
         "request_id": request_id,
         "action": action,
         "payload": payload or {},
     }
-    if key is not None:
-        data["idempotency_key"] = key
+    if action in IDEMPOTENT_ACTIONS:
+        data["execution_key"] = execution_key or ("b" * 64)
+        data["idempotency_key"] = key or f"{action}-default"
+    else:
+        if execution_key is not None:
+            data["execution_key"] = execution_key
+        if key is not None:
+            data["idempotency_key"] = key
     return data
 
 
@@ -32,6 +39,9 @@ class ProviderABITests(unittest.TestCase):
         self.assertEqual(manifest["evidence"]["class"], "simulated")
         self.assertIn("memory_prepare", manifest["actions"])
         self.assertIn("execute", manifest["actions"])
+        self.assertEqual(manifest["idempotency"]["mode"], "durable-replay")
+        self.assertTrue(manifest["idempotency"]["durable"])
+        self.assertFalse(manifest["idempotency"]["side_effect_atomic"])
 
     def test_memory_prepare_release_is_persistent_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,6 +105,58 @@ class ProviderABITests(unittest.TestCase):
                 telemetry["telemetry"]["provider_id"],
                 PROVIDER_ID,
             )
+
+    def test_execute_duplicate_replays_recorded_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            req = request(
+                "e-replay",
+                "execute",
+                {
+                    "workload": "qwen-like",
+                    "backend_node": "hardware:electronic-cpnpu",
+                    "memory_nodes": ["memory:shared-cxl"],
+                },
+                key="execute-replay-key",
+            )
+            first = handle_request(req, state_path=state)
+            second = handle_request(req, state_path=state)
+            self.assertTrue(first["ok"])
+            self.assertFalse(first["replayed"])
+            self.assertTrue(second["ok"])
+            self.assertTrue(second["replayed"])
+            self.assertEqual(second["result"], first["result"])
+            self.assertEqual(second["execution_key"], "b" * 64)
+
+    def test_idempotency_key_reuse_for_different_payload_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            first = request(
+                "m1",
+                "memory_prepare",
+                {
+                    "workload": "w1",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="same-key",
+            )
+            second = request(
+                "m2",
+                "memory_prepare",
+                {
+                    "workload": "w2",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 2048,
+                },
+                key="same-key",
+            )
+            self.assertTrue(handle_request(first, state_path=state)["ok"])
+            rejected = handle_request(second, state_path=state)
+            self.assertFalse(rejected["ok"])
+            self.assertIn("different operation", rejected["error"])
 
     def test_bad_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
