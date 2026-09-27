@@ -210,5 +210,63 @@ class ProviderABITests(unittest.TestCase):
             self.assertIn("schema", response["error"])
 
 
+    def test_protected_execute_is_durably_replayed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            protected = request(
+                "protected-1",
+                "execute",
+                {
+                    "workload": "protected-virtual",
+                    "backend_node": "hardware:electronic-cpnpu",
+                    "memory_nodes": ["memory:shared-cxl"],
+                },
+                key="b" * 64,
+            )
+            protected["execution_key"] = "a" * 64
+
+            first = handle_request(protected, state_path=state)
+            second = handle_request(protected, state_path=state)
+
+            self.assertTrue(first["ok"])
+            self.assertTrue(second["ok"])
+            self.assertFalse(first["replayed"])
+            self.assertTrue(second["replayed"])
+            self.assertEqual(first["execution_key"], "a" * 64)
+            self.assertEqual(second["idempotency_key"], "b" * 64)
+            self.assertEqual(first["result"], second["result"])
+
+    def test_protected_key_payload_conflict_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            first = request(
+                "protected-1",
+                "memory_prepare",
+                {
+                    "workload": "w1",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="d" * 64,
+            )
+            first["execution_key"] = "c" * 64
+            changed = dict(first)
+            changed["request_id"] = "protected-2"
+            changed["payload"] = dict(first["payload"], workload="w2")
+
+            self.assertTrue(handle_request(first, state_path=state)["ok"])
+            conflict = handle_request(changed, state_path=state)
+            self.assertFalse(conflict["ok"])
+            self.assertIn("different provider operation", conflict["error"])
+
+    def test_manifest_advertises_asm_idempotency_contract(self):
+        contract = provider_manifest()["idempotency"]
+        self.assertEqual(contract["mode"], "durable-result-cache")
+        self.assertIn("execute", contract["actions"])
+        self.assertTrue(contract["replay_response"])
+        self.assertTrue(contract["ambiguous_inflight_blocks_retry"])
+
+
 if __name__ == "__main__":
     unittest.main()
