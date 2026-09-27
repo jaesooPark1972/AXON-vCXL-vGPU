@@ -55,3 +55,12 @@ against the same interface that future vCPNPU/vCXL engine binaries can adopt.
 
 When an actual engine is source-audited, only the provider implementation and
 evidence class need to change; Assembly's execution contract does not.
+
+## Phase 36 execution identity and durable replay
+
+The simulated vCXL/vCPNPU provider now requires an ASM execution identity for `memory_prepare`, `memory_release`, and `execute`.
+
+It advertises durable replay with `side_effect_atomic=false`. The replay cache is SQLite-backed and uses `BEGIN IMMEDIATE` so competing Provider processes with the same operation key serialize. The first response is stored; later identical calls return it with `replayed=true`.
+
+This is a control-safety property only. The provider remains a SIMULATED vCXL/vCPNPU path and does not prove physical CXL, DMA, GPU, or CPNPU execution.
+
