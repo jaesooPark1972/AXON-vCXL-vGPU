@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -157,6 +158,45 @@ class ProviderABITests(unittest.TestCase):
             rejected = handle_request(second, state_path=state)
             self.assertFalse(rejected["ok"])
             self.assertIn("different operation", rejected["error"])
+
+    def test_concurrent_memory_prepare_executes_once_and_replays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            req = request(
+                "m-concurrent",
+                "memory_prepare",
+                {
+                    "workload": "w",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="concurrent-memory-key",
+            )
+            barrier = threading.Barrier(3)
+            results = []
+            lock = threading.Lock()
+
+            def worker():
+                barrier.wait()
+                response = handle_request(req, state_path=state)
+                with lock:
+                    results.append(response)
+
+            threads = [threading.Thread(target=worker) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            barrier.wait()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(len(results), 2)
+            self.assertTrue(all(item["ok"] for item in results))
+            self.assertEqual(
+                sorted(item["replayed"] for item in results),
+                [False, True],
+            )
+            self.assertEqual(results[0]["result"], results[1]["result"])
 
     def test_bad_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
