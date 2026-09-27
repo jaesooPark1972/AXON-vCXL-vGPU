@@ -45,11 +45,10 @@ def provider_manifest() -> dict[str, object]:
             "response_encoding": "json",
         },
         "idempotency": {
-            "mode": "durable-replay",
-            "durable": True,
-            "replay_behavior": "return-recorded-response",
-            "side_effect_atomic": False,
-            "requires_execution_key": True,
+            "mode": "durable-result-cache",
+            "actions": sorted(IDEMPOTENT_ACTIONS),
+            "replay_response": True,
+            "ambiguous_inflight_blocks_retry": True,
         },
         "evidence": {
             "class": "simulated",
@@ -110,7 +109,11 @@ def handle_request(
                 error=f"{type(exc).__name__}: {exc}",
             )
 
-    if action in IDEMPOTENT_ACTIONS:
+    if (
+        action in IDEMPOTENT_ACTIONS
+        and request.get("execution_key") is not None
+        and request.get("idempotency_key") is not None
+    ):
         try:
             return DurableReplayStore(
                 replay_db_for_state(state_path)
@@ -333,14 +336,13 @@ def _validate_request(request: Mapping[str, Any]) -> None:
         raise TypeError("payload must be an object")
     key = request.get("idempotency_key")
     execution_key = request.get("execution_key")
-    if action in IDEMPOTENT_ACTIONS:
+    if (key is None) != (execution_key is None):
+        raise ValueError(
+            "execution_key and idempotency_key must be supplied together"
+        )
+    if execution_key is not None:
         _sha256(execution_key, "execution_key")
-        _non_empty_string(key, "idempotency_key")
-    else:
-        if execution_key is not None:
-            _sha256(execution_key, "execution_key")
-        if key is not None:
-            _non_empty_string(key, "idempotency_key")
+        _sha256(key, "idempotency_key")
 
 
 def _response(
