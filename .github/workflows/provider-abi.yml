@@ -1,0 +1,28 @@
+name: Provider ABI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Provider tests
+        run: python -m unittest discover -s tests -v
+      - name: Existing deterministic simulation rig
+        run: python simulate_performance_rig.py
+      - name: Provider ABI smoke
+        shell: bash
+        run: |
+          REQ='{"schema":"axon.provider-request/v0.1","request_id":"ci-describe","action":"describe","payload":{}}'
+          OUT="$(python provider_abi.py describe --request-json "$REQ" --state build/provider-state.json)"
+          python -c 'import json,sys; x=json.loads(sys.argv[1]); assert x["ok"] is True; assert x["provider_id"]=="axon-vcxl-vcpnpu-provider"; assert x["result"]["abi_version"]=="0.1"' "$OUT"
