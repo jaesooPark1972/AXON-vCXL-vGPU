@@ -86,8 +86,8 @@ def handle_request(
             ok=False,
             result={},
             telemetry={},
-            execution_key=_optional_string(request.get("execution_key")),
-            idempotency_key=_optional_string(request.get("idempotency_key")),
+            execution_key=None,
+            idempotency_key=None,
             error=f"{type(exc).__name__}: {exc}",
         )
 
