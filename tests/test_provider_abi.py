@@ -171,7 +171,7 @@ class ProviderABITests(unittest.TestCase):
             self.assertTrue(handle_request(first, state_path=state)["ok"])
             rejected = handle_request(second, state_path=state)
             self.assertFalse(rejected["ok"])
-            self.assertIn("different operation", rejected["error"])
+            self.assertIn("different provider operation", rejected["error"])
 
     def test_concurrent_memory_prepare_executes_once_and_replays(self):
         with tempfile.TemporaryDirectory() as tmp:
