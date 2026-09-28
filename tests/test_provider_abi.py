@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import threading
@@ -15,6 +16,14 @@ from provider_abi import (
 
 
 def request(request_id, action, payload=None, key=None, execution_key=None):
+    def digest(value, default):
+        raw = default if value is None else value
+        if isinstance(raw, str) and len(raw) == 64 and all(
+            ch in "0123456789abcdef" for ch in raw
+        ):
+            return raw
+        return hashlib.sha256(str(raw).encode("utf-8")).hexdigest()
+
     data = {
         "schema": PROVIDER_REQUEST_SCHEMA,
         "request_id": request_id,
@@ -22,8 +31,8 @@ def request(request_id, action, payload=None, key=None, execution_key=None):
         "payload": payload or {},
     }
     if action in IDEMPOTENT_ACTIONS:
-        data["execution_key"] = execution_key or ("b" * 64)
-        data["idempotency_key"] = key or f"{action}-default"
+        data["execution_key"] = digest(execution_key, "b" * 64)
+        data["idempotency_key"] = digest(key, f"{action}-default")
     else:
         if execution_key is not None:
             data["execution_key"] = execution_key
@@ -40,9 +49,14 @@ class ProviderABITests(unittest.TestCase):
         self.assertEqual(manifest["evidence"]["class"], "simulated")
         self.assertIn("memory_prepare", manifest["actions"])
         self.assertIn("execute", manifest["actions"])
-        self.assertEqual(manifest["idempotency"]["mode"], "durable-replay")
-        self.assertTrue(manifest["idempotency"]["durable"])
-        self.assertFalse(manifest["idempotency"]["side_effect_atomic"])
+        self.assertEqual(
+            manifest["idempotency"]["mode"],
+            "durable-result-cache",
+        )
+        self.assertTrue(manifest["idempotency"]["replay_response"])
+        self.assertTrue(
+            manifest["idempotency"]["ambiguous_inflight_blocks_retry"]
+        )
 
     def test_memory_prepare_release_is_persistent_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
