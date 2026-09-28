@@ -143,6 +143,74 @@ class ProviderABITests(unittest.TestCase):
             self.assertEqual(second["result"], first["result"])
             self.assertEqual(second["execution_key"], "b" * 64)
 
+    def test_replay_rebinds_response_to_current_request_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            first_request = request(
+                "replay-original",
+                "memory_prepare",
+                {
+                    "workload": "w",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="replay-correlation-key",
+            )
+            retry_request = dict(first_request)
+            retry_request["request_id"] = "replay-retry"
+
+            first = handle_request(first_request, state_path=state)
+            replay = handle_request(retry_request, state_path=state)
+
+            self.assertTrue(first["ok"])
+            self.assertTrue(replay["ok"])
+            self.assertTrue(replay["replayed"])
+            self.assertEqual(replay["request_id"], "replay-retry")
+
+    def test_malformed_identity_returns_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = request(
+                "malformed-identity",
+                "memory_prepare",
+                {
+                    "workload": "w",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="malformed-key",
+            )
+            raw["idempotency_key"] = 123
+            response = handle_request(
+                raw,
+                state_path=Path(tmp) / "state.json",
+            )
+            self.assertFalse(response["ok"])
+            self.assertIsNone(response["execution_key"])
+            self.assertIsNone(response["idempotency_key"])
+
+    def test_noncanonical_identity_text_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = request(
+                "noncanonical-identity",
+                "memory_prepare",
+                {
+                    "workload": "w",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="canonical-key",
+            )
+            raw["execution_key"] = "A" * 64
+            response = handle_request(
+                raw,
+                state_path=Path(tmp) / "state.json",
+            )
+            self.assertFalse(response["ok"])
+            self.assertIn("canonical lowercase", response["error"])
+
     def test_idempotency_key_reuse_for_different_payload_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state.json"
