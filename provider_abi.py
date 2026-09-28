@@ -340,6 +340,10 @@ def _validate_request(request: Mapping[str, Any]) -> None:
         raise ValueError(
             "execution_key and idempotency_key must be supplied together"
         )
+    if action in IDEMPOTENT_ACTIONS and execution_key is None:
+        raise ValueError(
+            f"{action} requires execution_key and idempotency_key"
+        )
     if execution_key is not None:
         for field_name, value in (
             ("execution_key", execution_key),
