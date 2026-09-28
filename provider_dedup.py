@@ -32,6 +32,7 @@ class DurableReplayStore:
         request: Mapping[str, Any],
         operation: Callable[[], dict[str, object]],
     ) -> dict[str, object]:
+        request_id = _non_empty_string(request.get("request_id"), "request_id")
         execution_key = _sha256(request.get("execution_key"), "execution_key")
         idempotency_key = _sha256(
             request.get("idempotency_key"),
@@ -47,6 +48,7 @@ class DurableReplayStore:
             request_hash=request_hash,
         )
         if replay is not None:
+            replay["request_id"] = request_id
             return replay
 
         response = operation()
