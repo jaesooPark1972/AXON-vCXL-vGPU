@@ -168,6 +168,31 @@ class ProviderABITests(unittest.TestCase):
             self.assertTrue(replay["replayed"])
             self.assertEqual(replay["request_id"], "replay-retry")
 
+    def test_side_effect_without_execution_identity_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = request(
+                "missing-protected-identity",
+                "memory_prepare",
+                {
+                    "workload": "w",
+                    "memory_node": "memory:shared-cxl",
+                    "memory_kind": "cxl",
+                    "required_memory_bytes": 1024,
+                },
+                key="temporary-key",
+            )
+            raw.pop("execution_key")
+            raw.pop("idempotency_key")
+            response = handle_request(
+                raw,
+                state_path=Path(tmp) / "state.json",
+            )
+            self.assertFalse(response["ok"])
+            self.assertIn(
+                "requires execution_key and idempotency_key",
+                response["error"],
+            )
+
     def test_malformed_identity_returns_structured_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             raw = request(
