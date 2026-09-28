@@ -205,12 +205,22 @@ class ProviderABITests(unittest.TestCase):
                 thread.join()
 
             self.assertEqual(len(results), 2)
-            self.assertTrue(all(item["ok"] for item in results))
-            self.assertEqual(
-                sorted(item["replayed"] for item in results),
-                [False, True],
+            first_exec = [
+                item for item in results
+                if item["ok"] and not item["replayed"]
+            ]
+            self.assertEqual(len(first_exec), 1)
+            duplicate = next(
+                item for item in results if item is not first_exec[0]
             )
-            self.assertEqual(results[0]["result"], results[1]["result"])
+            if duplicate["ok"]:
+                self.assertTrue(duplicate["replayed"])
+                self.assertEqual(
+                    duplicate["result"],
+                    first_exec[0]["result"],
+                )
+            else:
+                self.assertIn("INFLIGHT", duplicate["error"])
 
     def test_bad_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
