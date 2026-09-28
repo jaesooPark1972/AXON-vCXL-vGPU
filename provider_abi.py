@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from provider_dedup import DurableReplayStore, replay_db_for_state
 from simulate_performance_rig import HardwareSpec, ModelSpec, simulate_axon_engine
 
 
@@ -13,6 +14,12 @@ PROVIDER_REQUEST_SCHEMA = "axon.provider-request/v0.1"
 PROVIDER_RESPONSE_SCHEMA = "axon.provider-response/v0.1"
 PROVIDER_ABI_VERSION = "0.1"
 PROVIDER_ID = "axon-vcxl-vcpnpu-provider"
+
+IDEMPOTENT_ACTIONS = {
+    "memory_prepare",
+    "memory_release",
+    "execute",
+}
 
 ACTIONS = (
     "describe",
@@ -37,6 +44,12 @@ def provider_manifest() -> dict[str, object]:
             "request_encoding": "json",
             "response_encoding": "json",
         },
+        "idempotency": {
+            "mode": "durable-result-cache",
+            "actions": sorted(IDEMPOTENT_ACTIONS),
+            "replay_response": True,
+            "ambiguous_inflight_blocks_retry": True,
+        },
         "evidence": {
             "class": "simulated",
             "note": (
@@ -48,6 +61,11 @@ def provider_manifest() -> dict[str, object]:
             "memory_prepare/memory_release persist only virtual lease metadata.",
             "execute calls simulate_axon_engine() from simulate_performance_rig.py.",
             "No physical CXL link, DMA engine, vGPU daemon, or CPNPU ASIC is controlled.",
+            (
+                "SQLite durable replay serializes Provider ABI operations and returns "
+                "recorded responses; future physical-device side effects require their "
+                "own transaction/idempotency integration."
+            ),
         ],
     }
 
@@ -61,37 +79,6 @@ def handle_request(
     action = _non_empty_string(request.get("action"), "action")
     try:
         _validate_request(request)
-        payload = request.get("payload", {})
-        assert isinstance(payload, dict)
-
-        if action == "describe":
-            result = provider_manifest()
-            telemetry: dict[str, object] = {}
-        elif action == "memory_prepare":
-            result = _memory_prepare(payload, request, Path(state_path))
-            telemetry = {}
-        elif action == "memory_release":
-            result = _memory_release(payload, request, Path(state_path))
-            telemetry = {}
-        elif action == "execute":
-            result, telemetry = _execute(payload, Path(state_path))
-        elif action == "telemetry":
-            state = _load_state(Path(state_path))
-            result = {
-                "active_memory_leases": dict(state.get("memory_leases", {})),
-                "state_path": str(Path(state_path)),
-            }
-            telemetry = dict(state.get("last_telemetry", {}))
-        else:
-            raise ValueError(f"unsupported action: {action}")
-
-        return _response(
-            request_id=request_id,
-            action=action,
-            ok=True,
-            result=result,
-            telemetry=telemetry,
-        )
     except Exception as exc:
         return _response(
             request_id=request_id,
@@ -99,9 +86,92 @@ def handle_request(
             ok=False,
             result={},
             telemetry={},
+            execution_key=None,
+            idempotency_key=None,
             error=f"{type(exc).__name__}: {exc}",
         )
 
+    def operation() -> dict[str, object]:
+        try:
+            return _execute_validated_request(
+                request,
+                state_path=Path(state_path),
+            )
+        except Exception as exc:
+            return _response(
+                request_id=request_id,
+                action=action,
+                ok=False,
+                result={},
+                telemetry={},
+                execution_key=_optional_string(request.get("execution_key")),
+                idempotency_key=_optional_string(request.get("idempotency_key")),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+    if (
+        action in IDEMPOTENT_ACTIONS
+        and request.get("execution_key") is not None
+        and request.get("idempotency_key") is not None
+    ):
+        try:
+            return DurableReplayStore(
+                replay_db_for_state(state_path)
+            ).run(request, operation)
+        except Exception as exc:
+            return _response(
+                request_id=request_id,
+                action=action,
+                ok=False,
+                result={},
+                telemetry={},
+                execution_key=_optional_string(request.get("execution_key")),
+                idempotency_key=_optional_string(request.get("idempotency_key")),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+    return operation()
+
+
+def _execute_validated_request(
+    request: Mapping[str, Any],
+    *,
+    state_path: Path,
+) -> dict[str, object]:
+    request_id = _non_empty_string(request.get("request_id"), "request_id")
+    action = _non_empty_string(request.get("action"), "action")
+    payload = request.get("payload", {})
+    assert isinstance(payload, dict)
+
+    if action == "describe":
+        result = provider_manifest()
+        telemetry: dict[str, object] = {}
+    elif action == "memory_prepare":
+        result = _memory_prepare(payload, request, state_path)
+        telemetry = {}
+    elif action == "memory_release":
+        result = _memory_release(payload, request, state_path)
+        telemetry = {}
+    elif action == "execute":
+        result, telemetry = _execute(payload, state_path)
+    elif action == "telemetry":
+        state = _load_state(state_path)
+        result = {
+            "active_memory_leases": dict(state.get("memory_leases", {})),
+            "state_path": str(state_path),
+        }
+        telemetry = dict(state.get("last_telemetry", {}))
+    else:
+        raise ValueError(f"unsupported action: {action}")
+
+    return _response(
+        request_id=request_id,
+        action=action,
+        ok=True,
+        result=result,
+        telemetry=telemetry,
+        execution_key=_optional_string(request.get("execution_key")),
+        idempotency_key=_optional_string(request.get("idempotency_key")),
+    )
 
 def _memory_prepare(
     payload: Mapping[str, Any],
@@ -265,8 +335,30 @@ def _validate_request(request: Mapping[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise TypeError("payload must be an object")
     key = request.get("idempotency_key")
-    if key is not None:
-        _non_empty_string(key, "idempotency_key")
+    execution_key = request.get("execution_key")
+    if (key is None) != (execution_key is None):
+        raise ValueError(
+            "execution_key and idempotency_key must be supplied together"
+        )
+    if action in IDEMPOTENT_ACTIONS and execution_key is None:
+        raise ValueError(
+            f"{action} requires execution_key and idempotency_key"
+        )
+    if execution_key is not None:
+        for field_name, value in (
+            ("execution_key", execution_key),
+            ("idempotency_key", key),
+        ):
+            if not isinstance(value, str) or value != value.strip():
+                raise ValueError(
+                    f"{field_name} must be canonical lowercase SHA-256 text"
+                )
+            if value != value.lower():
+                raise ValueError(
+                    f"{field_name} must be canonical lowercase SHA-256 text"
+                )
+        _sha256(execution_key, "execution_key")
+        _sha256(key, "idempotency_key")
 
 
 def _response(
@@ -276,6 +368,9 @@ def _response(
     ok: bool,
     result: Mapping[str, object],
     telemetry: Mapping[str, object],
+    execution_key: str | None = None,
+    idempotency_key: str | None = None,
+    replayed: bool = False,
     error: str | None = None,
 ) -> dict[str, object]:
     return {
@@ -293,6 +388,9 @@ def _response(
         },
         "result": dict(result),
         "telemetry": dict(telemetry),
+        "execution_key": execution_key,
+        "idempotency_key": idempotency_key,
+        "replayed": replayed,
         "error": error,
     }
 
@@ -323,6 +421,19 @@ def _save_state(path: Path, state: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp.replace(path)
+
+
+def _sha256(value: object, field_name: str) -> str:
+    text = _non_empty_string(value, field_name).lower()
+    if len(text) != 64 or any(ch not in "0123456789abcdef" for ch in text):
+        raise ValueError(f"{field_name} must be a lowercase SHA-256 hex digest")
+    return text
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return _non_empty_string(value, "optional_string")
 
 
 def _non_empty_string(value: Any, field_name: str) -> str:
