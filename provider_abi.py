@@ -341,6 +341,18 @@ def _validate_request(request: Mapping[str, Any]) -> None:
             "execution_key and idempotency_key must be supplied together"
         )
     if execution_key is not None:
+        for field_name, value in (
+            ("execution_key", execution_key),
+            ("idempotency_key", key),
+        ):
+            if not isinstance(value, str) or value != value.strip():
+                raise ValueError(
+                    f"{field_name} must be canonical lowercase SHA-256 text"
+                )
+            if value != value.lower():
+                raise ValueError(
+                    f"{field_name} must be canonical lowercase SHA-256 text"
+                )
         _sha256(execution_key, "execution_key")
         _sha256(key, "idempotency_key")
 
